@@ -1,6 +1,7 @@
 #include "AutosaveController.h"
 
 #include <imgui.h>
+#include "AlienImGui.h"
 
 #include "Base/Resources.h"
 #include "Base/GlobalSettings.h"
@@ -12,56 +13,86 @@
 #include "OverlayMessageController.h"
 #include "SerializationHelperService.h"
 
+/* TODOKYLER: remove
 namespace
 {
     auto constexpr MinutesForAutosave = 40;
 }
+*/
 
 _AutosaveController::_AutosaveController(SimulationController const& simController)
-    : _simController(simController)
+    : _AlienWindow("Autosave", "windows.autosave sources", false)
+    , _simController(simController)
 {
     _startTimePoint = std::chrono::steady_clock::now();
-    _on = GlobalSettings::getInstance().getBool("controllers.auto save.active", true);
+    _active = GlobalSettings::getInstance().getBool("controllers.auto save.active", true);
+    _minutesToAutosave = GlobalSettings::getInstance().getInt("controllers.auto save.minutes", 40);
 }
 
 _AutosaveController::~_AutosaveController()
 {
-    GlobalSettings::getInstance().setBool("controllers.auto save.active", _on);
+    GlobalSettings::getInstance().setBool("controllers.auto save.active", _active);
+    GlobalSettings::getInstance().setInt("controllers.auto save.minutes", _minutesToAutosave);
 }
 
 void _AutosaveController::shutdown()
 {
-    if (!_on) {
+    if (!_active) {
         return;
     }
     onSave();
 }
 
-bool _AutosaveController::isOn() const
+bool _AutosaveController::isActive() const
 {
-    return _on;
+    return _active;
 }
 
-void _AutosaveController::setOn(bool value)
+void _AutosaveController::setActive(bool value)
 {
-    _on = value;
+    _active = value;
 }
 
-void _AutosaveController::process()
+
+
+void _AutosaveController::processBackground()
 {
-    if (!_on) {
+    if (!_active) {
         return;
     }
 
     auto durationSinceStart = std::chrono::duration_cast<std::chrono::minutes>(std::chrono::steady_clock::now() - *_startTimePoint).count();
-    if (durationSinceStart > 0 && durationSinceStart % MinutesForAutosave == 0 && !_alreadySaved) {
+    if (durationSinceStart > 0 && (durationSinceStart - _lastSave) > _minutesToAutosave) {
+        _lastSave = durationSinceStart;
         printOverlayMessage("Auto saving ...");
         delayedExecution([=, this] { onSave(); });
-        _alreadySaved = true;
     }
-    if (durationSinceStart > 0 && durationSinceStart % MinutesForAutosave == 1 && _alreadySaved) {
-        _alreadySaved = false;
-    }
+    //if (durationSinceStart > 0 && durationSinceStart % _minutesToAutosave == 1 && _alreadySaved) {
+    //    _alreadySaved = false;
+    //}
+}
+
+void _AutosaveController::processIntern() 
+{
+    AlienImGui::Checkbox(
+        AlienImGui::CheckboxParameters()
+            .name("active")
+            .defaultValue(true)
+            .tooltip("Toggle to autosave periodically"),
+        _active
+    );
+
+    AlienImGui::SliderInt(
+        AlienImGui::SliderIntParameters()
+            .name("autosave period")
+            .min(1)
+            .max(1440)
+            .logarithmic(true)
+            .infinity(false)
+            .tooltip("the simulation will autosave this many minutes"),
+        &_minutesToAutosave
+    );
+
 }
 
 void _AutosaveController::onSave()
